@@ -1,0 +1,8 @@
+<?xml version="1.0"?>
+<configuration>
+<openbydefault>false</openbydefault>
+<icon>assets/images/widget.png</icon>
+<label>Nexrad</label>
+<description>WMS Nexrad Looping Widget</description>
+<helpurl>http://www.arcgis.com/home/item.html?id=75d3bf48976c44ef986a70e0dcad0f75</helpurl>
+</configuration>

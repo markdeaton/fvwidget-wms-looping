@@ -1,0 +1,216 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--=============================================================================
+* 
+* Copyright © 2011 ESRI. All rights reserved. 
+* 
+* Use subject to ESRI license agreement.
+* 
+* Unpublished—all rights reserved.
+* Use of this ESRI commercial Software, Data, and Documentation is limited to
+* the ESRI License Agreement. In no event shall the Government acquire greater
+* than Restricted/Limited Rights. At a minimum Government rights to use,
+* duplicate, or disclose is subject to restrictions as set for in FAR 12.211,
+* FAR 12.212, and FAR 52.227-19 (June 1987), FAR 52.227-14 (ALT I, II, and III)
+* (June 1987), DFARS 227.7202, DFARS 252.227-7015 (NOV 1995).
+* Contractor/Manufacturer is ESRI, 380 New York Street, Redlands,
+* CA 92373-8100, USA.
+* 
+* SAMPLE CODE IS PROVIDED "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES,
+* INCLUDING THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
+* PARTICULAR PURPOSE, ARE DISCLAIMED.  IN NO EVENT SHALL ESRI OR CONTRIBUTORS
+* BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+* CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+* SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+* INTERRUPTION) SUSTAINED BY YOU OR A THIRD PARTY, HOWEVER CAUSED AND ON ANY
+* THEORY OF LIABILITY, WHETHER IN CONTRACT; STRICT LIABILITY; OR TORT ARISING
+* IN ANY WAY OUT OF THE USE OF THIS SAMPLE CODE, EVEN IF ADVISED OF THE
+* POSSIBILITY OF SUCH DAMAGE TO THE FULL EXTENT ALLOWED BY APPLICABLE LAW.
+* 
+* =============================================================================-->
+<viewer:BaseWidget xmlns:fx="http://ns.adobe.com/mxml/2009" 
+				   xmlns:s="library://ns.adobe.com/flex/spark" 
+				   xmlns:mx="library://ns.adobe.com/flex/mx" 
+				   xmlns:viewer="com.esri.viewer.*" 
+				   xmlns:esri="http://www.esri.com/2008/ags"
+				   layout="absolute"
+				   widgetConfigLoaded="configLoaded(event)"
+				   currentState="paused"
+					>
+	<viewer:states>
+		<s:State name="paused" enterState="onStatePaused(event)"/>
+		<s:State name="running" enterState="onStateRunning(event)"/>
+	</viewer:states>
+	<fx:Script>
+	<![CDATA[
+		import com.esri.ags.events.ExtentEvent;
+		import com.esri.ags.layers.WMSLayer;
+		
+		import mx.collections.ArrayList;
+		import mx.events.FlexEvent;
+		import mx.formatters.DateFormatter;
+		
+		/*===== VARS =====*/
+		[Bindable]
+		private var	m_cfg:XML;
+		
+		/** List of visible WMS sublayers **/
+		private var m_aVisLyrs:ArrayList;
+		
+		/** 
+		 * List of WMS sublayer time offsets (for displaying the local time represented 
+		 * by the layer that's on screen) 
+		 **/
+		private var m_aOffsetMins:ArrayList;
+		
+		[Bindable]		
+		/** 
+		 * This date/time is the basis to which the sub-layer offsets (from the config file) 
+		 * are added for the display time. 
+		 **/
+		private var m_lastQueryTime:Date = new Date();
+		
+		private var m_loopTimer:Timer;
+		
+		[Bindable]
+		/** 
+		 * Unfortunately, the Timer's currentCount property isn't bindable, so we keep 
+		 * independent track here of the number times the Timer has fired. 
+		 **/
+		private var m_iTimerTicks:int = 0;
+		
+		/*===== CODE =====*/
+		protected function configLoaded(event:Event):void
+		{
+			m_cfg = configXML;
+
+			m_loopTimer = new Timer( m_cfg.timerMsPerLayer.valueOf() );
+			m_loopTimer.addEventListener( TimerEvent.TIMER, onTimerTick );
+			
+			// Construct list of cycling layers
+			var aLyrs:XMLList = m_cfg.layersToRotate.layer;
+			m_aVisLyrs = new ArrayList(); 
+			m_aOffsetMins = new ArrayList();
+			
+			for each ( var xmlLayer:XML in aLyrs ) {
+				m_aVisLyrs.addItem( xmlLayer.text().toString() );
+				m_aOffsetMins.addItem( Number(xmlLayer.attribute( "offsetMins" ).valueOf()) );
+			}
+			
+			// Set startup state as paused or running depending on config file contents
+			currentState = m_cfg.startUpState.valueOf().toString();
+
+			wmsLyr.visibleLayers = m_aVisLyrs;
+			map.addLayer( wmsLyr );
+		}
+
+		protected function onOpen(event:Event):void
+		{
+			if(m_cfg){
+				wmsLyr.visibleLayers = m_aVisLyrs;
+				map.addLayer( wmsLyr );
+			}
+		}
+
+
+		protected function onClose(event:Event):void
+		{
+			map.removeLayer( wmsLyr );
+		}
+		
+		protected function onStatePaused(event:FlexEvent):void
+		{
+			if ( m_loopTimer ) m_loopTimer.stop();
+		}
+
+
+		protected function onStateRunning(event:FlexEvent):void
+		{
+			if ( m_loopTimer ) m_loopTimer.start();
+		}
+
+		private function onTimerTick( event:TimerEvent ):void {
+			try {
+				m_iTimerTicks++;	
+			}
+			catch ( e:Error ) {
+				m_iTimerTicks = 0;
+			}
+			// Update the base time (used for the displayed time) at the start of each cycle.
+			// Because we don't know when data is updated on the server, the displayed time
+			// won't ever be guaranteed accurate. But at most it will be off by 5 minutes.
+			if ( currentLayerIndex( m_iTimerTicks ) == 0 )
+				m_lastQueryTime = new Date();
+		}
+		
+		private function visibleLayers( iTimerTicks:int ):ArrayList {
+			var sLyrName:String = currentLayerName( iTimerTicks );
+			return new ArrayList( [ sLyrName ] );
+		}
+		private function currentLayerName( iTimerTicks:int ):String {
+			var iLyrIdx:int = currentLayerIndex( iTimerTicks );
+			return m_aVisLyrs.getItemAt( iLyrIdx ) as String;
+		}
+		private function currentLayerIndex( iTimerTicks:int ):int {
+			// Modulo operator to cycle through the provided list of visible layers
+			return iTimerTicks % m_aVisLyrs.length;
+		}
+		
+		private function currentLayerDateTime( iTimerTicks:int ):Date {
+			var iLyrIdx:int = currentLayerIndex( iTimerTicks );
+			var nMSQueryTime:Number = m_lastQueryTime.time;
+			// Combining offsets with current date/time must be done in milliseconds...
+			var nMSLayerOffset:Number = Number(m_aOffsetMins.getItemAt( iLyrIdx )) * 60 * 1000;
+			var dt:Date = new Date( m_lastQueryTime.time + nMSLayerOffset );
+			
+			return dt;
+		}
+		
+		private function legendVisible( cfg:XML ):Boolean {
+			if ( cfg ) {
+				return ( cfg.legend.visible.valueOf().toString().toLowerCase() == "true" );
+			}
+			else return false;
+		}
+		
+		private function opacityTip( value:Number ):Object {
+			return ( value ).toFixed() + "%";
+		}
+	]]>
+	</fx:Script>
+
+
+	<fx:Declarations>
+		<!-- Place non-visual elements (e.g., services, value objects) here -->
+		<esri:WMSLayer id="wmsLyr" disableClientCaching="true" alpha="{trkOpacity.value / 100}" url="{m_cfg.url}" version="{m_cfg.version}" imageFormat="{m_cfg.imgFormat}" visibleLayers="{visibleLayers( m_iTimerTicks )}"/>
+		
+		<mx:DateFormatter id="dfQueryDate" formatString="{m_cfg.dateFormatString}"/>
+	</fx:Declarations>
+	
+	
+	<viewer:WidgetTemplate id="wt" open="onOpen(event)" closed="onClose(event)" width="325" height="210">
+		<viewer:layout>
+			<s:VerticalLayout/>
+		</viewer:layout>
+		
+		<s:HGroup verticalAlign="middle">
+			<mx:Image toolTip.paused="Click to run" toolTip.running="Click to pause" width="32" height="32" source.paused="widgets/WMSLooping/assets/images/Run_big.png" source.running="widgets/WMSLooping/assets/images/Pause_big.png" buttonMode="true" click.paused="currentState='running'" click.running="currentState='paused'"/>
+			<s:Label text="{dfQueryDate.format( currentLayerDateTime( m_iTimerTicks ) )}" color="0xFFF000"/>
+		</s:HGroup>
+		
+		<mx:Text htmlText="{m_cfg.about}" width="100%" height="100%"/>
+		
+		<s:VGroup id="grpLegend" visible="{legendVisible( m_cfg )}" width="100%" height="100%">
+			<s:Group width="100%">
+				<s:Label text="{m_cfg.legend.minLabel}" left="0"/>
+				<s:Label text="{m_cfg.legend.maxLabel}" right="0"/>
+			</s:Group>
+			<mx:Image id="imgLegend" rotation="{m_cfg.legend.imgRotationDegrees}" scaleContent="true" height="100%" width="100%" source="{m_cfg.legend.imgURL}"/>
+		</s:VGroup>
+
+		<s:HGroup width="100%">
+			<s:Label text="Opacity:"/>
+			<s:HSlider id="trkOpacity" dataTipFormatFunction="opacityTip" minimum="0" maximum="100" stepSize="5" value="{m_cfg.opacityDefault}" showDataTip="true" liveDragging="true" width="100%"/>
+		</s:HGroup>
+	</viewer:WidgetTemplate>
+	
+</viewer:BaseWidget>
